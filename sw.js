@@ -1,5 +1,5 @@
 /* Offline cache. Bump CACHE on every deploy or the old page is served forever. */
-var CACHE  = 'trip-mw-v1';
+var CACHE  = 'trip-mw-v2';
 var ASSETS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 /* Hosts that must always go to the network. Caching either of these would be a

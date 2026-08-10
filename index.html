@@ -230,6 +230,33 @@
   /* ---------- map / directions chips ---------- */
   .card-body { flex:1; min-width:0; padding:6px 10px 4px; }
   .card .card-body textarea { width:100%; padding:8px 34px 4px 4px; }
+
+  /* ---------- formatted item view ---------- */
+  .item-view { padding:9px 30px 4px 4px; cursor:text; border-radius:6px; }
+  .item-view:hover { background:#f8fafc; }
+  .item-view:focus-visible { outline:2px solid #60a5fa; outline-offset:1px; }
+  .item-view p { margin:0 0 6px; font-size:15px; line-height:1.5; color:var(--ink); }
+  .item-view p:last-child { margin-bottom:0; }
+  .item-view p.placeholder { color:#cbd5e1; font-style:italic; }
+  .item-view ol { margin:2px 0 6px; padding-left:20px; }
+  .item-view li { margin-bottom:5px; font-size:14.5px; line-height:1.45; color:#475569; }
+  .item-view li::marker { color:#94a3b8; font-weight:700; }
+
+  .badge-row { display:flex; align-items:center; gap:9px; flex-wrap:wrap; margin-bottom:7px; }
+  .badge {
+    font-size:10.5px; font-weight:700; letter-spacing:.05em; text-transform:uppercase;
+    padding:3px 8px; border-radius:5px; white-space:nowrap;
+  }
+  .badge.go   { background:#e0e7ff; color:#3730a3; }
+  .badge.food { background:#fef3c7; color:#92400e; }
+  .badge.note { background:#f1f5f9; color:#475569; }
+  .dur { font-size:11.5px; color:#94a3b8; }
+
+  .time-pill {
+    display:inline-block; font-weight:700; font-size:13px; color:#0f172a;
+    background:#e2e8f0; border-radius:5px; padding:2px 7px; margin-right:8px;
+    font-variant-numeric:tabular-nums;
+  }
   .chips { display:flex; flex-wrap:wrap; gap:7px; padding:2px 4px 8px; }
   .chip {
     display:inline-flex; align-items:center; gap:5px; text-decoration:none;
@@ -522,6 +549,108 @@ if ('serviceWorker' in navigator) {
     return text.replace(RE_MARK, '').replace(/[ \t]+/g, ' ').replace(/ *\n/g, '\n').trim();
   }
 
+  /* ============ presentation ============
+     Everything below is DERIVED from the text you already write — no new
+     syntax to learn, no extra fields, nothing for the sync layer to carry. */
+  var RE_TIME  = /^\s*(\d{1,2}[:.]\d{2}\s*(?:AM|PM)?)\s*[-–—]\s*/i;
+  var RE_BADGE = /^\s*(\p{Extended_Pictographic}[^:\n]{0,48}?)\s*:\s*/u;
+  var RE_DUR   = /\((~?\s*\d+(?:\s*[-–]\s*\d+)?\s*min(?:ute)?s?[^)]{0,12})\)/i;
+  var RE_LI    = /^\s*(\d+)[.)]\s+/;
+
+  function parseItem(raw) {
+    var out = { time:null, badge:null, dur:null, blocks:[] };
+    var body = clean(raw);
+
+    var m = body.match(RE_TIME);
+    if (m) { out.time = m[1].replace(/\s+/g, ' ').toUpperCase(); body = body.slice(m[0].length); }
+
+    m = body.match(RE_BADGE);
+    if (m) { out.badge = m[1].trim(); body = body.slice(m[0].length); }
+
+    m = body.match(RE_DUR);
+    if (m) { out.dur = m[1].trim().replace(/\s+/g, ' '); body = body.replace(m[0], '').replace(/\s{2,}/g, ' '); }
+
+    // group consecutive "1. …" lines into a single list block
+    body.split('\n').forEach(function (line) {
+      if (!line.trim()) return;
+      var li = line.match(RE_LI);
+      var last = out.blocks[out.blocks.length - 1];
+      if (li) {
+        if (last && last.type === 'list') last.items.push(line.slice(li[0].length).trim());
+        else out.blocks.push({ type:'list', items:[line.slice(li[0].length).trim()] });
+      } else {
+        out.blocks.push({ type:'p', text:line.trim() });
+      }
+    });
+    return out;
+  }
+
+  function badgeKind(label) {
+    var s = label.toUpperCase();
+    if (/TRANSPORT|WALK|METRO|TRAIN|TAXI/.test(s)) return 'go';
+    if (/LUNCH|BREAKFAST|DINNER|PICKUP|SNACK|FOOD/.test(s)) return 'food';
+    return 'note';
+  }
+
+  function renderItemView(el, raw) {
+    el.innerHTML = '';
+    var p = parseItem(raw);
+
+    if (p.badge) {
+      var row = document.createElement('div');
+      row.className = 'badge-row';
+      var b = document.createElement('span');
+      b.className = 'badge ' + badgeKind(p.badge);
+      b.textContent = p.badge;
+      row.appendChild(b);
+      if (p.dur) {
+        var d = document.createElement('span');
+        d.className = 'dur';
+        d.textContent = p.dur;
+        row.appendChild(d);
+      }
+      el.appendChild(row);
+    }
+
+    p.blocks.forEach(function (blk, i) {
+      if (blk.type === 'list') {
+        var ol = document.createElement('ol');
+        blk.items.forEach(function (t) {
+          var li = document.createElement('li');
+          li.textContent = t;
+          ol.appendChild(li);
+        });
+        el.appendChild(ol);
+      } else {
+        var para = document.createElement('p');
+        if (i === 0 && p.time) {
+          var pill = document.createElement('span');
+          pill.className = 'time-pill';
+          pill.textContent = p.time;
+          para.appendChild(pill);
+        }
+        para.appendChild(document.createTextNode(blk.text));
+        el.appendChild(para);
+      }
+    });
+
+    // a time with no body text still deserves its pill
+    if (p.time && !p.blocks.length) {
+      var only = document.createElement('p');
+      var pill2 = document.createElement('span');
+      pill2.className = 'time-pill';
+      pill2.textContent = p.time;
+      only.appendChild(pill2);
+      el.appendChild(only);
+    }
+    if (!p.blocks.length && !p.time && !p.badge) {
+      var ph = document.createElement('p');
+      ph.className = 'placeholder';
+      ph.textContent = 'Empty — tap to add details';
+      el.appendChild(ph);
+    }
+  }
+
   /* ============ weather ============
      Kept entirely outside `days`, so it never reaches Firebase or a downloaded copy. */
   var TRIP_DAYS = {
@@ -800,11 +929,20 @@ if ('serviceWorker' in navigator) {
       var body = document.createElement('div');
       body.className = 'card-body';
 
+      // Formatted, read-only presentation. Being a <div> it cannot receive
+      // typing or autocorrect at all, so the tidy view can never be written
+      // back over the real text — the risk is removed rather than guarded.
+      var view = document.createElement('div');
+      view.className = 'item-view';
+      view.tabIndex = 0;
+      view.setAttribute('role', 'button');
+      view.setAttribute('aria-label', 'Edit this item');
+
       var ta = document.createElement('textarea');
+      ta.className = 'item-edit';
       ta.rows = 1;
+      ta.hidden = true;
       ta.placeholder = 'Enter activity details...';
-      ta.dataset.mode = 'clean';
-      ta.value = clean(act.text);
 
       var chips = document.createElement('div');
       chips.className = 'chips';
@@ -821,32 +959,31 @@ if ('serviceWorker' in navigator) {
           chips.appendChild(a);
         });
       }
-      paintChips();
+      function paintView() { renderItemView(view, act.text); paintChips(); }
+      paintView();
 
-      // Tidy view when blurred, real text when focused.
-      ta.addEventListener('focus', function () {
-        ta.dataset.mode = 'raw';
-        ta.value = act.text;
+      function startEdit() {
+        view.hidden = true;
+        ta.hidden = false;
+        ta.value = act.text;          // always the real text, markers included
         grow(ta);
+        ta.focus();
+        ta.setSelectionRange(ta.value.length, ta.value.length);
+      }
+      function endEdit() {
+        ta.hidden = true;
+        view.hidden = false;
+        paintView();
+      }
+      view.addEventListener('click', startEdit);
+      view.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startEdit(); }
       });
-      ta.addEventListener('blur', function () {
-        ta.dataset.mode = 'clean';
-        ta.value = clean(act.text);
-        grow(ta);
-      });
+      ta.addEventListener('blur', endEdit);
       ta.addEventListener('input', function () {
-        // GUARD: the tidy view must never be written back to state, or every
-        // marker on this item would be destroyed and synced to both phones.
-        // Snap the box back to the stored text rather than leaving a phantom
-        // edit on screen that was silently discarded.
-        if (ta.dataset.mode !== 'raw') {
-          ta.value = clean(act.text);
-          grow(ta);
-          return;
-        }
+        if (ta.hidden) return;        // cheap insurance; a hidden box can't fire this
         act.text = ta.value;
         grow(ta);
-        paintChips();
         save();
       });
 
@@ -861,6 +998,7 @@ if ('serviceWorker' in navigator) {
         renderDay();
       });
 
+      body.appendChild(view);
       body.appendChild(ta);
       body.appendChild(chips);
       card.appendChild(stripe);
@@ -877,8 +1015,8 @@ if ('serviceWorker' in navigator) {
       day.activities.push({ id: 'x-' + Date.now().toString(36), text: '' });
       save();
       renderDay();
-      var boxes = sheet.querySelectorAll('textarea');
-      if (boxes.length) boxes[boxes.length - 1].focus();
+      var views = sheet.querySelectorAll('.item-view');
+      if (views.length) views[views.length - 1].click();   // open the new item for editing
     });
     sheet.appendChild(add);
 
